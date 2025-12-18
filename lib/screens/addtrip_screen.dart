@@ -68,8 +68,8 @@ class _AddTripScreenState extends State<AddTripScreen> {
 
     final trip = Trip(
       id: '',
-      source: _sourceController.text.trim(),
-      destination: _destinationController.text.trim(),
+      source: _sourceController.text.toLowerCase().trim(),
+      destination: _destinationController.text.toLowerCase().trim(),
       date: _selectedDate!,
       time: _selectedTime!, // ✅ use dropdown value
       availableSeats: _selectedBusCapacity!,

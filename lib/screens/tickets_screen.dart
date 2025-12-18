@@ -25,6 +25,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
   Map<String, Bus> _busMap = {};
   bool _loading = true;
   Set<String> _cancellingTickets = {};
+  Map<String, bool> _ratedTickets = {}; // Track which tickets have been rated
 
   @override
   void initState() {
@@ -37,6 +38,13 @@ class _TicketsScreenState extends State<TicketsScreen> {
       final tickets = await _ticketService.getTicketsByUser(widget.currentUserId);
       final trips = await _tripService.getTrips();
       final buses = await _busService.getBuses();
+
+      // Sort tickets by trip date (newest first)
+      tickets.sort((a, b) {
+        final tripA = trips.firstWhere((t) => t.id == a.tripID, orElse: () => trips.first);
+        final tripB = trips.firstWhere((t) => t.id == b.tripID, orElse: () => trips.first);
+        return tripB.date.compareTo(tripA.date);
+      });
 
       setState(() {
         _tickets = tickets;
@@ -52,7 +60,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
     }
   }
 
-  // Check if trip is today
   bool _isTripToday(Trip trip) {
     final now = DateTime.now();
     final tripDate = trip.date;
@@ -61,12 +68,129 @@ class _TicketsScreenState extends State<TicketsScreen> {
         tripDate.day == now.day;
   }
 
-  // Check if trip date has passed (only comparing dates, not time)
   bool _isTripPast(Trip trip) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final tripDate = DateTime(trip.date.year, trip.date.month, trip.date.day);
     return tripDate.isBefore(today);
+  }
+
+  Future<void> _showRatingDialog(Ticket ticket, Trip trip, Bus bus) async {
+    int selectedRating = 0;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Rate Your Trip',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'How was your experience on bus ${bus.busNumber}?',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey[700]),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  final starValue = index + 1;
+                  return IconButton(
+                    iconSize: 40,
+                    icon: Icon(
+                      starValue <= selectedRating ? Icons.star : Icons.star_border,
+                      color: starValue <= selectedRating ? Colors.amber : Colors.grey[400],
+                    ),
+                    onPressed: () {
+                      setDialogState(() {
+                        selectedRating = starValue;
+                      });
+                    },
+                  );
+                }),
+              ),
+              if (selectedRating > 0) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _getRatingText(selectedRating),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.amber[700],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: selectedRating > 0
+                  ? () {
+                Navigator.pop(context);
+                _submitRating(ticket, bus.id, selectedRating.toDouble());
+              }
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey[300],
+              ),
+              child: const Text('Submit'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getRatingText(int rating) {
+    switch (rating) {
+      case 1:
+        return 'Poor';
+      case 2:
+        return 'Fair';
+      case 3:
+        return 'Good';
+      case 4:
+        return 'Very Good';
+      case 5:
+        return 'Excellent';
+      default:
+        return '';
+    }
+  }
+
+  Future<void> _submitRating(Ticket ticket, String busId, double rating) async {
+    try {
+      await _busService.addRating(busId, rating);
+
+      setState(() {
+        _ratedTickets[ticket.id] = true;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Thank you for your rating!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to submit rating: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _showCancellationDialog(Ticket ticket) async {
@@ -278,6 +402,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
             final isCancelling = _cancellingTickets.contains(ticket.id);
             final isCancelled = ticket.status == 'cancelled';
             final isPastTrip = trip != null && _isTripPast(trip);
+            final hasBeenRated = _ratedTickets[ticket.id] ?? false;
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -327,7 +452,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
-                                  decoration: isCancelled ? TextDecoration.lineThrough : null,
+                                  decoration:
+                                  isCancelled ? TextDecoration.lineThrough : null,
                                   color: isCancelled ? Colors.grey : null,
                                 ),
                               ),
@@ -335,18 +461,22 @@ class _TicketsScreenState extends State<TicketsScreen> {
                               if (trip != null) ...[
                                 Row(
                                   children: [
-                                    const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                                    const Icon(Icons.calendar_today,
+                                        size: 14, color: Colors.grey),
                                     const SizedBox(width: 4),
                                     Text(
                                       trip.date.toLocal().toString().split(' ')[0],
-                                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                                      style: TextStyle(
+                                          color: Colors.grey[700], fontSize: 13),
                                     ),
                                     const SizedBox(width: 12),
-                                    const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                                    const Icon(Icons.access_time,
+                                        size: 14, color: Colors.grey),
                                     const SizedBox(width: 4),
                                     Text(
                                       trip.time,
-                                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                                      style: TextStyle(
+                                          color: Colors.grey[700], fontSize: 13),
                                     ),
                                   ],
                                 ),
@@ -355,7 +485,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   "Bus: ${bus.busNumber}",
-                                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                  style:
+                                  TextStyle(color: Colors.grey[600], fontSize: 13),
                                 ),
                               ],
                             ],
@@ -372,7 +503,11 @@ class _TicketsScreenState extends State<TicketsScreen> {
                           "Booked: ${ticket.paymentDate.toLocal().toString().split(' ')[0]}",
                           style: TextStyle(color: Colors.grey[600], fontSize: 12),
                         ),
-                        if (!isPastTrip && !isCancelled && trip != null && !_isTripToday(trip))
+                        // Show cancel button for upcoming trips
+                        if (!isPastTrip &&
+                            !isCancelled &&
+                            trip != null &&
+                            !_isTripToday(trip))
                           isCancelling
                               ? const SizedBox(
                             width: 20,
@@ -387,6 +522,33 @@ class _TicketsScreenState extends State<TicketsScreen> {
                               foregroundColor: Colors.red,
                               padding: const EdgeInsets.symmetric(horizontal: 12),
                             ),
+                          ),
+                        // Show rate button for completed trips
+                        if (isPastTrip && !isCancelled && bus != null && !hasBeenRated)
+                          TextButton.icon(
+                            onPressed: () => _showRatingDialog(ticket, trip!, bus),
+                            icon: const Icon(Icons.star_border, size: 18),
+                            label: const Text("Rate"),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.amber[700],
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                            ),
+                          ),
+                        // Show rated indicator
+                        if (isPastTrip && !isCancelled && hasBeenRated)
+                          Row(
+                            children: [
+                              Icon(Icons.star, size: 18, color: Colors.amber[700]),
+                              const SizedBox(width: 4),
+                              Text(
+                                "Rated",
+                                style: TextStyle(
+                                  color: Colors.amber[700],
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
                           ),
                       ],
                     ),

@@ -103,6 +103,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
         type: _selectedType,
         imageUrl: imageUrl,
         rating: _rating,
+        numberOfRatings: 0,
       );
 
       await _busService.addBus(newBus);

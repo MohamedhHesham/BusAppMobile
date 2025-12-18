@@ -5,6 +5,7 @@ class Bus {
   final String type;
   final String imageUrl;
   final double rating;
+  final int numberOfRatings;
 
   Bus({
     required this.id,
@@ -13,6 +14,7 @@ class Bus {
     required this.type,
     required this.imageUrl,
     required this.rating,
+    required this.numberOfRatings,
   });
 
   // Convert Firestore doc → Bus
@@ -24,6 +26,7 @@ class Bus {
       type: data['type'] ?? '',
       imageUrl: data['imageUrl'] ?? '',
       rating: (data['rating'] ?? 0).toDouble(),
+      numberOfRatings: data['numberOfRatings'] ?? 0,
     );
   }
 
@@ -35,6 +38,7 @@ class Bus {
       'type': type,
       'imageUrl': imageUrl,
       'rating': rating,
+      'numberOfRatings': numberOfRatings,
     };
   }
 }
