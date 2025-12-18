@@ -14,7 +14,7 @@ class TicketService {
     try {
       final snapshot = await _db
           .collection('tickets')
-          .where('userID', isEqualTo: userId) // ✅ string compare
+          .where('userID', isEqualTo: userId)
           .get();
 
       if (snapshot.docs.isEmpty) return [];
@@ -140,12 +140,12 @@ class TicketService {
       final tripDate = (tripDoc.data()?['date'] as Timestamp).toDate();
       final now = DateTime.now();
 
-      // ✅ Allow cancellation if today is before trip date
+      // Allow cancellation if today is before trip date
       if (now.isBefore(DateTime(tripDate.year, tripDate.month, tripDate.day))) {
         return true;
       }
 
-      // ✅ If same day, allow cancellation only if > 2 hours before
+      // If same day, allow cancellation only if > 2 hours before
       final hoursDifference = tripDate.difference(now).inHours;
       return hoursDifference > 2;
     } catch (e) {
@@ -169,6 +169,105 @@ class TicketService {
       return status == 'cancelled';
     } catch (e) {
       print('Error checking ticket status: $e');
+      return false;
+    }
+  }
+
+  // Mark a ticket as rated
+  Future<bool> markTicketAsRated(String ticketId) async {
+    try {
+      await _db.collection('tickets').doc(ticketId).update({
+        'isRated': true,
+        'ratedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      print('Error marking ticket as rated: $e');
+      return false;
+    }
+  }
+
+  // Get unrated tickets for a user (useful for prompting reviews)
+  Future<List<Ticket>> getUnratedTicketsByUser(String userId) async {
+    try {
+      final snapshot = await _db
+          .collection('tickets')
+          .where('userID', isEqualTo: userId)
+          .where('status', isEqualTo: 'booked')
+          .where('isRated', isEqualTo: false)
+          .get();
+
+      if (snapshot.docs.isEmpty) return [];
+
+      final tickets = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Ticket.fromFirestore(data, doc.id);
+      }).toList();
+
+      // Sort by paymentDate (oldest first for unrated)
+      tickets.sort((a, b) => a.paymentDate.compareTo(b.paymentDate));
+
+      return tickets;
+    } catch (e) {
+      print('Error fetching unrated tickets: $e');
+      return [];
+    }
+  }
+
+  // Get completed tickets that can be rated (trip date has passed)
+  Future<List<Ticket>> getCompletedUnratedTickets(String userId) async {
+    try {
+      final snapshot = await _db
+          .collection('tickets')
+          .where('userID', isEqualTo: userId)
+          .where('status', isEqualTo: 'booked')
+          .where('isRated', isEqualTo: false)
+          .get();
+
+      if (snapshot.docs.isEmpty) return [];
+
+      final tickets = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Ticket.fromFirestore(data, doc.id);
+      }).toList();
+
+      // Filter tickets where trip date has passed
+      final completedTickets = <Ticket>[];
+      final now = DateTime.now();
+
+      for (final ticket in tickets) {
+        try {
+          final tripDoc = await _db.collection('trips').doc(ticket.tripID).get();
+          if (tripDoc.exists) {
+            final tripDate = (tripDoc.data()?['date'] as Timestamp).toDate();
+            if (tripDate.isBefore(now)) {
+              completedTickets.add(ticket);
+            }
+          }
+        } catch (e) {
+          print('Error checking trip date for ticket ${ticket.id}: $e');
+        }
+      }
+
+      // Sort by paymentDate (oldest first)
+      completedTickets.sort((a, b) => a.paymentDate.compareTo(b.paymentDate));
+
+      return completedTickets;
+    } catch (e) {
+      print('Error fetching completed unrated tickets: $e');
+      return [];
+    }
+  }
+
+  // Check if a specific ticket has been rated
+  Future<bool> isTicketRated(String ticketId) async {
+    try {
+      final ticketDoc = await _db.collection('tickets').doc(ticketId).get();
+      if (!ticketDoc.exists) return false;
+
+      return ticketDoc.data()?['isRated'] ?? false;
+    } catch (e) {
+      print('Error checking if ticket is rated: $e');
       return false;
     }
   }

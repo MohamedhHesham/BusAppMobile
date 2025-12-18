@@ -25,7 +25,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
   Map<String, Bus> _busMap = {};
   bool _loading = true;
   Set<String> _cancellingTickets = {};
-  Map<String, bool> _ratedTickets = {}; // Track which tickets have been rated
 
   @override
   void initState() {
@@ -101,7 +100,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                 children: List.generate(5, (index) {
                   final starValue = index + 1;
                   return IconButton(
-                    iconSize: 40,
+                    iconSize: 20,
                     icon: Icon(
                       starValue <= selectedRating ? Icons.star : Icons.star_border,
                       color: starValue <= selectedRating ? Colors.amber : Colors.grey[400],
@@ -171,11 +170,14 @@ class _TicketsScreenState extends State<TicketsScreen> {
 
   Future<void> _submitRating(Ticket ticket, String busId, double rating) async {
     try {
+      // Add rating to bus
       await _busService.addRating(busId, rating);
 
-      setState(() {
-        _ratedTickets[ticket.id] = true;
-      });
+      // Mark ticket as rated
+      await _ticketService.markTicketAsRated(ticket.id);
+
+      // Refresh tickets to update UI
+      await _fetchTickets();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -402,7 +404,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
             final isCancelling = _cancellingTickets.contains(ticket.id);
             final isCancelled = ticket.status == 'cancelled';
             final isPastTrip = trip != null && _isTripPast(trip);
-            final hasBeenRated = _ratedTickets[ticket.id] ?? false;
+            final isRated = ticket.isRated; // Use isRated from ticket model
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -523,8 +525,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 12),
                             ),
                           ),
-                        // Show rate button for completed trips
-                        if (isPastTrip && !isCancelled && bus != null && !hasBeenRated)
+                        // Show rate button for completed trips that haven't been rated
+                        if (isPastTrip && !isCancelled && bus != null && !isRated)
                           TextButton.icon(
                             onPressed: () => _showRatingDialog(ticket, trip!, bus),
                             icon: const Icon(Icons.star_border, size: 18),
@@ -534,8 +536,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 12),
                             ),
                           ),
-                        // Show rated indicator
-                        if (isPastTrip && !isCancelled && hasBeenRated)
+                        // Show rated indicator for completed trips that have been rated
+                        if (isPastTrip && !isCancelled && isRated)
                           Row(
                             children: [
                               Icon(Icons.star, size: 18, color: Colors.amber[700]),
