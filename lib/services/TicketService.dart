@@ -73,7 +73,6 @@ class TicketService {
           'message': 'No active ticket found for this trip'
         };
       }
-
       final ticketDoc = ticketsSnapshot.docs.first;
       final ticketData = ticketDoc.data();
       final paymentID = ticketData['paymentID'];
@@ -131,7 +130,8 @@ class TicketService {
     }
   }
 
-  // Check if a ticket can be cancelled
+
+
   Future<bool> canCancelTicket(String tripId) async {
     try {
       final tripDoc = await _db.collection('trips').doc(tripId).get();
